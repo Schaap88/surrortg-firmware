@@ -38,6 +38,12 @@ void Srtg::setup_sdk(const char* ssid,
 
     Serial.begin(115200);
 
+    if (init_max17043()) {
+        Serial.println("Battery fuel gauge initialized");
+    } else {
+        Serial.println("Battery fuel gauge initialization failed");
+    }
+
 #if defined(ARDUINO_ARCH_SAMD)
     wifi_reboot_count_ = wifi_reboot_counter.read();
 #endif
@@ -273,6 +279,25 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
                     (char*)&status.status_word, 2);
             connected_clients_[current_client_].write(
                     (char*)&wifi_reboot_count_, 2);
+        } else {
+            Serial.println(
+                    "No current client set, cannot send battery status!");
+        }
+        return false;
+    }
+#else
+    case CommandId::BATTERY_STATUS: {
+        if (current_client_ >= 0) {
+            BatteryStatus status;
+            if (read_battery_status(&status)) {
+                // Send battery status to the client
+                connected_clients_[current_client_].write(
+                        (uint8_t*)&status.voltage, sizeof(status.voltage));
+                connected_clients_[current_client_].write((uint8_t*)&status.soc,
+                                                          sizeof(status.soc));
+            } else {
+                Serial.println("Failed to read battery status");
+            }
         } else {
             Serial.println(
                     "No current client set, cannot send battery status!");
