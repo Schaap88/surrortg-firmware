@@ -14,9 +14,11 @@
 #elif defined(ARDUINO_ARCH_ESP8266)
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
+#include "utility/max17043_battery_manager.h"
 #elif defined(ARDUINO_ARCH_ESP32)
 #include <ArduinoOTA.h>
 #include <WiFi.h>
+#include "utility/max17043_battery_manager.h"
 #else
 #error "This library only works with ESP32 and ESP8266 based boards and Arduino MKR1000 / MKR1010"
 #endif
@@ -88,6 +90,15 @@ void Srtg::process_sdk() {
             IPAddress ip_addr = WiFi.localIP();
             Serial.print("WiFi OK, IP address: ");
             Serial.println(ip_addr);
+        }
+
+        // Get battery status
+        BatteryStatus status;
+        if (read_battery_status(&status)) {
+            Serial.printf("Battery Voltage: %.2f V, SOC: %.1f%%\n",
+                          status.voltage, status.soc);
+        } else {
+            Serial.println("Failed to read battery status!");
         }
     }
 
@@ -290,17 +301,19 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
         if (current_client_ >= 0) {
             BatteryStatus status;
             if (read_battery_status(&status)) {
-                // Send battery status to the client
-                connected_clients_[current_client_].write(
-                        (uint8_t*)&status.voltage, sizeof(status.voltage));
-                connected_clients_[current_client_].write((uint8_t*)&status.soc,
-                                                          sizeof(status.soc));
-            } else {
-                Serial.println("Failed to read battery status");
+                uint8_t response[9];
+                response[0] = static_cast<uint8_t>(CommandId::BATTERY_STATUS);
+                memcpy(&response[1], &status.voltage, 4);
+                memcpy(&response[5], &status.soc, 4);
+
+                // Non-blocking write
+                size_t written = 0;
+                while (written < sizeof(response)) {
+                    written += connected_clients_[current_client_].write(
+                            response + written, sizeof(response) - written);
+                    yield();  // Allow other operations
+                }
             }
-        } else {
-            Serial.println(
-                    "No current client set, cannot send battery status!");
         }
         return false;
     }
