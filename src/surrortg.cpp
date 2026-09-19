@@ -17,6 +17,7 @@
 #include "utility/max17043_battery_manager.h"
 #elif defined(ARDUINO_ARCH_ESP32)
 #include <ArduinoOTA.h>
+#include <Update.h>
 #include <WiFi.h>
 #include "utility/max17043_battery_manager.h"
 #else
@@ -29,6 +30,12 @@ FlashStorage(wifi_reboot_counter, uint16_t);
 
 Srtg SRTG = Srtg();
 
+// Override at build time if the consumer has a release identifier.
+#ifndef SRTG_FIRMWARE_BUILD_ID
+#define SRTG_FIRMWARE_BUILD_ID __DATE__ " " __TIME__
+#endif
+static const char firmware_build_id[] = SRTG_FIRMWARE_BUILD_ID;
+
 void Srtg::setup_sdk(const char* ssid,
                      const char* password,
                      const char* ota_password,
@@ -39,6 +46,12 @@ void Srtg::setup_sdk(const char* ssid,
     callbacks_ = callbacks;
 
     Serial.begin(115200);
+    Serial.print("Firmware build: ");
+    Serial.println(firmware_build_id);
+#if defined(ARDUINO_ARCH_ESP32)
+    Serial.print("Firmware image MD5: ");
+    Serial.println(ESP.getSketchMD5());
+#endif
 
     if (init_max17043()) {
         Serial.println("Battery fuel gauge initialized");
@@ -167,12 +180,18 @@ void Srtg::setup_ota() {
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
     ArduinoOTA.setPassword(ota_password_);
 
-    ArduinoOTA.onStart([]() { Serial.println("Start"); });
+    ArduinoOTA.onStart([]() {
+        Serial.print("OTA Start; running firmware build: ");
+        Serial.println(firmware_build_id);
+    });
 
     ArduinoOTA.onEnd([]() { Serial.println("\nEnd"); });
 
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progress: %u%%\n", (progress / (total / 100)));
+        Serial.printf("Progress: %u%%\n",
+                      total ? static_cast<unsigned int>(
+                                      (static_cast<uint64_t>(progress) * 100) / total)
+                            : 0);
     });
 
     ArduinoOTA.onError([](ota_error_t error) {
@@ -187,6 +206,13 @@ void Srtg::setup_ota() {
             Serial.println("Receive Failed");
         else if (error == OTA_END_ERROR)
             Serial.println("End Failed");
+#if defined(ARDUINO_ARCH_ESP32)
+        // Transport/authentication failures may have no Arduino Update error.
+        Serial.printf("Arduino Update error[%u]: %s\n", Update.getError(),
+                      Update.errorString());
+#elif defined(ARDUINO_ARCH_ESP8266)
+        Update.printError(Serial);
+#endif
     });
 
     ArduinoOTA.begin();
@@ -306,12 +332,24 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
                 memcpy(&response[1], &status.voltage, 4);
                 memcpy(&response[5], &status.soc, 4);
 
-                // Non-blocking write
+                // A zero-byte write must return control to process_sdk()/OTA.
+                // Disconnect after an incomplete frame to avoid stream corruption.
+                auto& client = connected_clients_[current_client_];
+                const unsigned long started = millis();
+                constexpr unsigned long write_deadline_ms = 100;
                 size_t written = 0;
-                while (written < sizeof(response)) {
-                    written += connected_clients_[current_client_].write(
+                while (written < sizeof(response) && client.connected() &&
+                       millis() - started < write_deadline_ms) {
+                    const size_t count = client.write(
                             response + written, sizeof(response) - written);
+                    if (count == 0) break;
+                    written += count;
                     yield();  // Allow other operations
+                }
+                if (written != sizeof(response)) {
+                    Serial.printf("Battery response incomplete (%u/9 bytes); disconnecting client\n",
+                                  static_cast<unsigned int>(written));
+                    client.stop();
                 }
             }
         }

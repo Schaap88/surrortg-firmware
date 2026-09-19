@@ -1,22 +1,25 @@
 # SurroRTG Arduino library
 
-This library provides tools to control WiFi microcontrollers through [Surrogate.tv](https://www.surrogate.tv/).
+This library provides tools to control WiFi microcontrollers using the SRTG TCP protocol.
 Supported microcontrollers include ESP32 and ESP8266 based boards, as well
-as Arduino MKR1000 and Arduino MKR1010. The library enables OTA-updates
-automatically, so the code can be uploaded wirelessly to the microcontrollers
-after the initial upload.
+as Arduino MKR1000 and Arduino MKR1010.
 
-For usage and installation instructions, see [Surrogate docs](https://docs.surrogate.tv/tcp_bot_games.html).
+On ESP32, `setup_sdk()` initializes ArduinoOTA and `process_sdk()` services it;
+the consuming firmware must call `process_sdk()` regularly and provide an
+OTA-capable partition layout and matching uploader configuration. ArduinoOTA
+uses default port **3232**, separate from the SRTG command port **31338**.
+The ESP32 partition table must contain `otadata` and two application slots
+(`ota_0` and `ota_1`), each large enough for the firmware. Existing devices
+with a single-slot layout need a serial flash of the new partition table and
+firmware before OTA can be used. See the [examples](examples) for library usage.
 
 ## Adding wifi and OTA credentials for examples
-
-For more in-depth instructions, see [Surrogate docs](https://docs.surrogate.tv/tcp_bot_games.html).
 
 Before the examples can be compiled and uploaded, the examples need wifi credentials
 and password for Over-The-Air (OTA) code updates. These can be set by making a
 new file called `wifi_secrets.h` and placing it to the same directory with the
-example code. To add a new file you have to save a copy of the example to a new
-location, because the examples directories are read-only.
+example code. If your Arduino IDE opens the example read-only, save a copy to
+a writable location first.
 Then, add the following content to the newly created file and change "ssid" to your
 wifi name and "password" to your wifi password. Change the value of ota_password to
 a password that you would like to use to secure your OTA uploads.
