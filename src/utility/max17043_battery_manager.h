@@ -2,6 +2,7 @@
 #define MAX17043_BATTERY_MANAGER_H
 
 #include <Wire.h>
+#include "max17043_conversion.h"
 
 /* Structure to hold battery status information */
 struct BatteryStatus {
@@ -9,10 +10,13 @@ struct BatteryStatus {
     float soc;     // State of charge in percentage
 };
 
-/* Initializes the MAX17043 battery manager */
-bool init_max17043();
+/* Initializes the MAX17043 battery manager on an application-owned I2C bus. */
+bool init_max17043(TwoWire& wire);
 
-/* Reads the current battery status */
+/* Refreshes the cached reading when its polling interval has elapsed. */
+void poll_max17043(unsigned long now_ms);
+
+/* Returns a recent cached reading without performing I2C transactions. */
 bool read_battery_status(BatteryStatus* status);
 
 #endif // MAX17043_BATTERY_MANAGER_H

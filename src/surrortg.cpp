@@ -36,10 +36,15 @@ Srtg SRTG = Srtg();
 #endif
 static const char firmware_build_id[] = SRTG_FIRMWARE_BUILD_ID;
 
+#ifndef SRTG_DEBUG
+#define SRTG_DEBUG 0
+#endif
+
 void Srtg::setup_sdk(const char* ssid,
                      const char* password,
                      const char* ota_password,
-                     SdkCallbacks* callbacks) {
+                     SdkCallbacks* callbacks,
+                     TwoWire& battery_bus) {
     ssid_ = ssid;
     password_ = password;
     ota_password_ = ota_password;
@@ -53,11 +58,17 @@ void Srtg::setup_sdk(const char* ssid,
     Serial.println(ESP.getSketchMD5());
 #endif
 
-    if (init_max17043()) {
+#if SRTG_DEBUG
+    if (init_max17043(battery_bus)) {
         Serial.println("Battery fuel gauge initialized");
     } else {
         Serial.println("Battery fuel gauge initialization failed");
     }
+#else
+    if (!init_max17043(battery_bus)) {
+        Serial.println("Battery fuel gauge initialization failed");
+    }
+#endif
 
 #if defined(ARDUINO_ARCH_SAMD)
     wifi_reboot_count_ = wifi_reboot_counter.read();
@@ -85,6 +96,10 @@ void Srtg::setup_sdk(const char* ssid,
 
 void Srtg::process_sdk() {
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
+    poll_max17043(millis());
+#endif
+
+#if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
     ArduinoOTA.handle();
 #elif defined(ARDUINO_SAMD_MKR1000)
     WiFiOTA.poll();
@@ -100,19 +115,25 @@ void Srtg::process_sdk() {
             Serial.println("Reconnecting WiFi...");
             setup_wifi();
         } else {
+#if SRTG_DEBUG
             IPAddress ip_addr = WiFi.localIP();
             Serial.print("WiFi OK, IP address: ");
             Serial.println(ip_addr);
+#endif
         }
 
-        // Get battery status
+        // Report the cached battery status when debug logging is enabled.
         BatteryStatus status;
         if (read_battery_status(&status)) {
-            Serial.printf("Battery Voltage: %.2f V, SOC: %.1f%%\n",
-                          status.voltage, status.soc);
-        } else {
-            Serial.println("Failed to read battery status!");
-        }
+#if SRTG_DEBUG
+    Serial.printf("Battery Voltage: %.2f V, SOC: %.1f%%\n",
+                  status.voltage, status.soc);
+#endif
+} else {
+#if SRTG_DEBUG
+    Serial.println("Failed to read battery status!");
+#endif
+}
     }
 
     process_server();
@@ -161,6 +182,7 @@ void Srtg::setup_wifi() {
     Serial.print("IP address: ");
     Serial.println(ip_addr);
 
+#if SRTG_DEBUG
     byte mac_addr[6];
     WiFi.macAddress(mac_addr);
     Serial.print("MAC: ");
@@ -174,6 +196,7 @@ void Srtg::setup_wifi() {
         }
     }
     Serial.println("");
+#endif
 }
 
 void Srtg::setup_ota() {
@@ -188,10 +211,11 @@ void Srtg::setup_ota() {
     ArduinoOTA.onEnd([]() { Serial.println("\nEnd"); });
 
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progress: %u%%\n",
-                      total ? static_cast<unsigned int>(
-                                      (static_cast<uint64_t>(progress) * 100) / total)
-                            : 0);
+        Serial.printf(
+                "Progress: %u%%\n",
+                total ? static_cast<unsigned int>(
+                                (static_cast<uint64_t>(progress) * 100) / total)
+                      : 0);
     });
 
     ArduinoOTA.onError([](ota_error_t error) {
@@ -290,7 +314,9 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
     /* Switch-case only has generic system commands */
     switch (cmd->cmd) {
     case CommandId::PING: {
+#if SRTG_DEBUG
         Serial.println("Ping packet received, sending response");
+#endif
         send_response(CommandId::PING, 0);
         return false;
     }
@@ -333,7 +359,8 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
                 memcpy(&response[5], &status.soc, 4);
 
                 // A zero-byte write must return control to process_sdk()/OTA.
-                // Disconnect after an incomplete frame to avoid stream corruption.
+                // Disconnect after an incomplete frame to avoid stream
+                // corruption.
                 auto& client = connected_clients_[current_client_];
                 const unsigned long started = millis();
                 constexpr unsigned long write_deadline_ms = 100;
@@ -342,13 +369,16 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
                        millis() - started < write_deadline_ms) {
                     const size_t count = client.write(
                             response + written, sizeof(response) - written);
-                    if (count == 0) break;
+                    if (count == 0)
+                        break;
                     written += count;
                     yield();  // Allow other operations
                 }
                 if (written != sizeof(response)) {
-                    Serial.printf("Battery response incomplete (%u/9 bytes); disconnecting client\n",
-                                  static_cast<unsigned int>(written));
+                    Serial.printf(
+                            "Battery response incomplete (%u/9 bytes); "
+                            "disconnecting client\n",
+                            static_cast<unsigned int>(written));
                     client.stop();
                 }
             }

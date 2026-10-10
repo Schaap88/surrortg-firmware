@@ -1,6 +1,8 @@
 #ifndef _SURRORTG_SRTG_H
 #define _SURRORTG_SRTG_H
 
+#include <Wire.h>
+
 #if defined(ARDUINO_SAMD_MKR1000)
 #include <WiFi101.h>
 #elif defined(ARDUINO_SAMD_MKRWIFI1010)
@@ -100,11 +102,14 @@ class Srtg {
      *  the OTA-updates. Can be anything the user decides.
      * @param callbacks a SdkCallbacks pointer that points to a struct
      *  including the information about callbacks
+     * @param battery_bus an application-initialized I2C bus used by the
+     *  battery monitor
      */
     void setup_sdk(const char* ssid,
                    const char* password,
                    const char* ota_password,
-                   SdkCallbacks* callbacks);
+                   SdkCallbacks* callbacks,
+                   TwoWire& battery_bus = Wire);
 
     /**
      * A function for processing the SurroRTG Arduino SDK.

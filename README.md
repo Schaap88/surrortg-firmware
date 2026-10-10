@@ -13,6 +13,13 @@ The ESP32 partition table must contain `otadata` and two application slots
 with a single-slot layout need a serial flash of the new partition table and
 firmware before OTA can be used. See the [examples](examples) for library usage.
 
+For ESP32/ESP8266 battery monitoring, the application owns and initializes the
+I2C bus passed to `setup_sdk()`. The MAX17043 manager polls every ten seconds;
+battery requests use a cached reading no more than thirty seconds old and do
+not perform I2C work in the TCP request path. If no fresh, checked reading is
+available, no battery packet is emitted because the existing packet format has
+no validity field.
+
 ## Adding wifi and OTA credentials for examples
 
 Before the examples can be compiled and uploaded, the examples need wifi credentials
