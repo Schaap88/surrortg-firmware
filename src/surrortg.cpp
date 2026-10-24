@@ -19,10 +19,13 @@
 #include <ArduinoOTA.h>
 #include <Update.h>
 #include <WiFi.h>
+#include <esp_system.h>
 #include "utility/max17043_battery_manager.h"
 #else
 #error "This library only works with ESP32 and ESP8266 based boards and Arduino MKR1000 / MKR1010"
 #endif
+
+#include "utility/device_identity.h"
 
 #if defined(SRTG_POWER_TELEMETRY) &&                                    \
         (defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32))
@@ -59,6 +62,11 @@ void Srtg::setup_sdk(const char* ssid,
     password_ = password;
     ota_password_ = ota_password;
     callbacks_ = callbacks;
+
+#if defined(ARDUINO_ARCH_ESP32)
+    station_mac_valid_ =
+            esp_read_mac(station_mac_, ESP_MAC_WIFI_STA) == ESP_OK;
+#endif
 
     Serial.begin(115200);
     Serial.print("Firmware build: ");
@@ -441,6 +449,36 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
         return false;
     }
 #endif
+    case CommandId::DEVICE_IDENTITY: {
+#if defined(ARDUINO_ARCH_ESP32)
+        if (current_client_ >= 0 && station_mac_valid_) {
+            uint8_t response[SRTG_DEVICE_IDENTITY_RESPONSE_SIZE];
+            serialize_device_identity(
+                    static_cast<uint8_t>(CommandId::DEVICE_IDENTITY),
+                    station_mac_, response);
+            auto& client = connected_clients_[current_client_];
+            const unsigned long started = millis();
+            constexpr unsigned long write_deadline_ms = 100;
+            size_t written = 0;
+            while (written < sizeof(response) && client.connected() &&
+                   millis() - started < write_deadline_ms) {
+                const size_t count = client.write(
+                        response + written, sizeof(response) - written);
+                if (count == 0) break;
+                written += count;
+                yield();
+            }
+            if (written != sizeof(response)) {
+                Serial.printf("Identity response incomplete (%u/%u bytes); "
+                              "disconnecting client\n",
+                              static_cast<unsigned int>(written),
+                              static_cast<unsigned int>(sizeof(response)));
+                client.stop();
+            }
+        }
+#endif
+        return false;
+    }
 #endif
 
     default: {

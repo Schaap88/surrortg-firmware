@@ -55,6 +55,18 @@ evidence that the battery is accepting charge.
 The legacy `BATTERY_STATUS` command remains ID `100` with its exact nine-byte
 native-float response. Existing clients do not need to change.
 
+### ESP32 hardware identity
+
+Command `102` (`DEVICE_IDENTITY`) returns an eight-byte response: command ID,
+format version `1`, then the ESP32 factory Wi-Fi station MAC as six bytes in
+normal display order. SDKs render those bytes as lowercase colon-separated
+text, for example `aa:bb:cc:01:02:03`. Firmware predating command 102 simply
+ignores the additive request.
+
+The station MAC is identification only. It is distinct from Platform Robot
+IDs, controller IDs, seats, IP addresses and TCP sessions, and must not be
+treated as an authentication credential or secret.
+
 ## Adding wifi and OTA credentials for examples
 
 Before the examples can be compiled and uploaded, the examples need wifi credentials

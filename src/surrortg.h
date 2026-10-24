@@ -34,6 +34,7 @@ enum class CommandId : uint8_t {
     /* Generic system commands */
     BATTERY_STATUS = 100,
     POWER_STATUS = 101,
+    DEVICE_IDENTITY = 102,
     PING = 200,
     STOP = 0xFF
 };
@@ -152,6 +153,8 @@ class Srtg {
     bool controls_enabled_ = false;
     int current_client_ = -1;
     uint16_t wifi_reboot_count_;
+    uint8_t station_mac_[6] = {0};
+    bool station_mac_valid_ = false;
 };
 extern Srtg SRTG;
 
