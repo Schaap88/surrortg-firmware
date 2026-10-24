@@ -24,6 +24,16 @@
 #error "This library only works with ESP32 and ESP8266 based boards and Arduino MKR1000 / MKR1010"
 #endif
 
+#if defined(SRTG_POWER_TELEMETRY) &&                                    \
+        (defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32))
+#include "utility/dock_power_monitor.h"
+#include "utility/ina226_power_monitor.h"
+#include "utility/power_status.h"
+#ifndef SRTG_DOCK_POWER_PIN
+#define SRTG_DOCK_POWER_PIN 15
+#endif
+#endif
+
 #if defined(ARDUINO_ARCH_SAMD)
 FlashStorage(wifi_reboot_counter, uint16_t);
 #endif
@@ -70,6 +80,14 @@ void Srtg::setup_sdk(const char* ssid,
     }
 #endif
 
+#if defined(SRTG_POWER_TELEMETRY) &&                                    \
+        (defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32))
+    if (!init_ina226(battery_bus)) {
+        Serial.println("Battery current monitor initialization failed");
+    }
+    init_dock_power_monitor(SRTG_DOCK_POWER_PIN, millis());
+#endif
+
 #if defined(ARDUINO_ARCH_SAMD)
     wifi_reboot_count_ = wifi_reboot_counter.read();
 #endif
@@ -97,6 +115,10 @@ void Srtg::setup_sdk(const char* ssid,
 void Srtg::process_sdk() {
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
     poll_max17043(millis());
+#if defined(SRTG_POWER_TELEMETRY)
+    poll_ina226(millis());
+    poll_dock_power_monitor(millis());
+#endif
 #endif
 
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
@@ -353,10 +375,10 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
         if (current_client_ >= 0) {
             BatteryStatus status;
             if (read_battery_status(&status)) {
-                uint8_t response[9];
-                response[0] = static_cast<uint8_t>(CommandId::BATTERY_STATUS);
-                memcpy(&response[1], &status.voltage, 4);
-                memcpy(&response[5], &status.soc, 4);
+                uint8_t response[LEGACY_BATTERY_STATUS_RESPONSE_SIZE];
+                serialize_legacy_battery_status(
+                        static_cast<uint8_t>(CommandId::BATTERY_STATUS),
+                        status, response);
 
                 // A zero-byte write must return control to process_sdk()/OTA.
                 // Disconnect after an incomplete frame to avoid stream
@@ -385,6 +407,40 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
         }
         return false;
     }
+#if defined(SRTG_POWER_TELEMETRY)
+    case CommandId::POWER_STATUS: {
+        if (current_client_ >= 0) {
+            const unsigned long now = millis();
+            uint8_t response[SRTG_POWER_STATUS_RESPONSE_SIZE];
+            serialize_power_status(
+                    static_cast<uint8_t>(CommandId::POWER_STATUS),
+                    read_max17048_telemetry(now),
+                    read_ina226_telemetry(now),
+                    read_dock_power_telemetry(now), response);
+
+            auto& client = connected_clients_[current_client_];
+            const unsigned long started = millis();
+            constexpr unsigned long write_deadline_ms = 100;
+            size_t written = 0;
+            while (written < sizeof(response) && client.connected() &&
+                   millis() - started < write_deadline_ms) {
+                const size_t count = client.write(
+                        response + written, sizeof(response) - written);
+                if (count == 0) break;
+                written += count;
+                yield();
+            }
+            if (written != sizeof(response)) {
+                Serial.printf("Power response incomplete (%u/%u bytes); "
+                              "disconnecting client\n",
+                              static_cast<unsigned int>(written),
+                              static_cast<unsigned int>(sizeof(response)));
+                client.stop();
+            }
+        }
+        return false;
+    }
+#endif
 #endif
 
     default: {
