@@ -113,6 +113,7 @@ void Srtg::process_sdk() {
         last_print_time = millis();
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("Reconnecting WiFi...");
+            disable_controls();
             setup_wifi();
         } else {
 #if SRTG_DEBUG
@@ -153,6 +154,7 @@ void Srtg::setup_wifi() {
     WiFi.begin(ssid_, password_);
     while (WiFi.waitForConnectResult() != WL_CONNECTED) {
         Serial.println("Connection Failed! Retrying");
+        disable_controls();
         delay(5000);
         ESP.restart();
     }
@@ -203,7 +205,8 @@ void Srtg::setup_ota() {
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
     ArduinoOTA.setPassword(ota_password_);
 
-    ArduinoOTA.onStart([]() {
+    ArduinoOTA.onStart([this]() {
+        disable_controls();
         Serial.print("OTA Start; running firmware build: ");
         Serial.println(firmware_build_id);
     });
@@ -260,10 +263,7 @@ void Srtg::process_server() {
     if (controls_enabled_) {
         /* If we haven't received commands for a while, disable all controls */
         if (millis() - last_network_action_ > CONTROLS_DISABLE_DELAY_MS) {
-            controls_enabled_ = false;
-            if (callbacks_->reset_cb) {
-                callbacks_->reset_cb();
-            }
+            disable_controls();
         }
 
         else {
@@ -277,13 +277,14 @@ void Srtg::process_server() {
 bool Srtg::process_client(int client_id) {
     static CommandPacket packet;
 
-    if (connected_clients_[client_id].available() >= 2) {
-        if (!connected_clients_[client_id].connected()) {
-            Serial.print("Executing command from disconnected client ");
-            Serial.print(client_id);
-            Serial.println(" buffer");
-        }
+    // Never execute bytes retained by a client after its TCP connection has
+    // closed. A new connection must supply a complete new command frame.
+    if (!clients_alive_[client_id] ||
+        !connected_clients_[client_id].connected()) {
+        return false;
+    }
 
+    if (connected_clients_[client_id].available() >= 2) {
         packet.cmd = (CommandId)connected_clients_[client_id].read();
         packet.value = (uint8_t)connected_clients_[client_id].read();
 
@@ -323,8 +324,7 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
 
     case CommandId::STOP: {
         if (callbacks_->reset_cb) {
-            callbacks_->reset_cb();
-            controls_enabled_ = false;
+            disable_controls();
             return false;
         }
     }
@@ -402,14 +402,16 @@ void Srtg::check_client_connections() {
             Serial.print(i);
             Serial.println(" disconnected");
             clients_alive_[i] = false;
+            connected_clients_[i].stop();
+            connected_clients_[i] = WiFiClient();
+            disable_controls();
         }
     }
 
     WiFiClient new_client = server_.available();
     if (new_client) {
         for (int i = 0; i < MAX_CLIENTS; ++i) {
-            if (!connected_clients_[i].connected() && !clients_alive_[i] &&
-                connected_clients_[i].available() < 2) {
+            if (!connected_clients_[i].connected() && !clients_alive_[i]) {
                 Serial.print("New connection accepted to slot ");
                 Serial.println(i);
                 connected_clients_[i] = new_client;
@@ -422,5 +424,13 @@ void Srtg::check_client_connections() {
         Serial.print(MAX_CLIENTS);
         Serial.println(" clients");
         new_client.stop();
+    }
+}
+
+void Srtg::disable_controls() {
+    controls_enabled_ = false;
+    current_client_ = -1;
+    if (callbacks_ && callbacks_->reset_cb) {
+        callbacks_->reset_cb();
     }
 }

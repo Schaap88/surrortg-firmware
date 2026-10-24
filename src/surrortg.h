@@ -128,6 +128,7 @@ class Srtg {
     void send_response(CommandId cmd_id, uint8_t val);
 
   private:
+    void disable_controls();
     void setup_wifi();
     void setup_ota();
     void process_server();
@@ -142,7 +143,7 @@ class Srtg {
     const char* ssid_;
     const char* password_;
     const char* ota_password_;
-    struct SdkCallbacks* callbacks_;
+    struct SdkCallbacks* callbacks_ = nullptr;
     class WiFiServer server_;
     class WiFiClient connected_clients_[MAX_CLIENTS];
     bool clients_alive_[MAX_CLIENTS] = {false};
