@@ -18,13 +18,10 @@ an explicit STOP, the five-second command timeout, client disconnection, WiFi
 loss/restart and OTA start. Buffered bytes from a disconnected client are
 discarded and cannot start a new control session.
 
-For ESP32/ESP8266 battery monitoring, the application owns and initializes the
-I2C bus passed to `setup_sdk()`. The historical MAX17043 API drives the
-register-compatible MAX17048 fitted to Power Board Rev A and polls every ten seconds;
-battery requests use a cached reading no more than thirty seconds old and do
-not perform I2C work in the TCP request path. If no fresh, checked reading is
-available, no battery packet is emitted because the existing packet format has
-no validity field.
+For ESP32/ESP8266 power monitoring, the application owns and initializes the
+I2C bus passed to `setup_sdk()`. The MAX17043 API drives the register-compatible
+MAX17048 fitted to Power Board Rev A and polls every ten seconds. Power requests
+serialize cached data and use explicit validity and age fields.
 
 When built with `SRTG_POWER_TELEMETRY`, command `101` (`POWER_STATUS`) adds a
 versioned 20-byte response. All multibyte fields are big-endian; signed fields
@@ -51,9 +48,6 @@ configuration is `0x4527`, current LSB is 100 uA and calibration is `0x1400`.
 GPIO15 dock detection uses plain `INPUT` (no internal pull-up) and 50 ms
 debounce. Dock presence only reports external power availability and is not
 evidence that the battery is accepting charge.
-
-The legacy `BATTERY_STATUS` command remains ID `100` with its exact nine-byte
-native-float response. Existing clients do not need to change.
 
 ### ESP32 hardware identity
 

@@ -32,7 +32,6 @@ enum class CommandId : uint8_t {
     CUSTOM_4 = 11,
     CUSTOM_4_CAL = 12,
     /* Generic system commands */
-    BATTERY_STATUS = 100,
     POWER_STATUS = 101,
     DEVICE_IDENTITY = 102,
     PING = 200,

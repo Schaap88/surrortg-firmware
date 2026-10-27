@@ -158,11 +158,3 @@ Max17048Telemetry read_max17048_telemetry(unsigned long now_ms) {
     result.valid = result.age_ms <= CACHE_MAX_AGE_MS;
     return result;
 }
-
-void serialize_legacy_battery_status(
-        uint8_t command_id, const BatteryStatus& status,
-        uint8_t response[LEGACY_BATTERY_STATUS_RESPONSE_SIZE]) {
-    response[0] = command_id;
-    memcpy(&response[1], &status.voltage, sizeof(status.voltage));
-    memcpy(&response[5], &status.soc, sizeof(status.soc));
-}

@@ -29,9 +29,5 @@ bool read_battery_status(BatteryStatus* status);
 /* Detailed MAX17048 status for the additive power telemetry response. */
 Max17048Telemetry read_max17048_telemetry(unsigned long now_ms);
 
-constexpr size_t LEGACY_BATTERY_STATUS_RESPONSE_SIZE = 9;
-void serialize_legacy_battery_status(
-        uint8_t command_id, const BatteryStatus& status,
-        uint8_t response[LEGACY_BATTERY_STATUS_RESPONSE_SIZE]);
 
 #endif // MAX17043_BATTERY_MANAGER_H

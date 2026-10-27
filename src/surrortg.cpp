@@ -359,62 +359,6 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
         }
     }
 
-#if defined(ARDUINO_SAMD_MKR1000)
-    case CommandId::BATTERY_STATUS: {
-        if (current_client_ >= 0) {
-            BatteryStatus status;
-            update_battery_usage(&status);
-            connected_clients_[current_client_].write(
-                    (char*)&status.battery_charge, 1);
-            connected_clients_[current_client_].write((char*)&status.charging,
-                                                      2);
-            connected_clients_[current_client_].write(
-                    (char*)&status.status_word, 2);
-            connected_clients_[current_client_].write(
-                    (char*)&wifi_reboot_count_, 2);
-        } else {
-            Serial.println(
-                    "No current client set, cannot send battery status!");
-        }
-        return false;
-    }
-#else
-    case CommandId::BATTERY_STATUS: {
-        if (current_client_ >= 0) {
-            BatteryStatus status;
-            if (read_battery_status(&status)) {
-                uint8_t response[LEGACY_BATTERY_STATUS_RESPONSE_SIZE];
-                serialize_legacy_battery_status(
-                        static_cast<uint8_t>(CommandId::BATTERY_STATUS),
-                        status, response);
-
-                // A zero-byte write must return control to process_sdk()/OTA.
-                // Disconnect after an incomplete frame to avoid stream
-                // corruption.
-                auto& client = connected_clients_[current_client_];
-                const unsigned long started = millis();
-                constexpr unsigned long write_deadline_ms = 100;
-                size_t written = 0;
-                while (written < sizeof(response) && client.connected() &&
-                       millis() - started < write_deadline_ms) {
-                    const size_t count = client.write(
-                            response + written, sizeof(response) - written);
-                    if (count == 0)
-                        break;
-                    written += count;
-                    yield();  // Allow other operations
-                }
-                if (written != sizeof(response)) {
-                    Serial.printf(
-                            "Battery response incomplete (%u/9 bytes); "
-                            "disconnecting client\n",
-                            static_cast<unsigned int>(written));
-                    client.stop();
-                }
-            }
-        }
-        return false;
-    }
 #if defined(SRTG_POWER_TELEMETRY)
     case CommandId::POWER_STATUS: {
         if (current_client_ >= 0) {
@@ -449,6 +393,7 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
         return false;
     }
 #endif
+
     case CommandId::DEVICE_IDENTITY: {
 #if defined(ARDUINO_ARCH_ESP32)
         if (current_client_ >= 0 && station_mac_valid_) {
@@ -479,7 +424,6 @@ bool Srtg::process_cmd(const CommandPacket* cmd) {
 #endif
         return false;
     }
-#endif
 
     default: {
         Serial.print("Invalid command type received: ");
